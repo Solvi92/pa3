@@ -26,8 +26,8 @@
 #include <time.h>
 #include <glib.h>
  
-#define RSA_SERVER_CERT       "fd.crt"
-#define RSA_SERVER_KEY        "fd.key"
+#define RSA_SERVER_CERT "fd.crt"
+#define RSA_SERVER_KEY "fd.key"
 
 #define RETURN_NULL(x)    if ((x)==NULL) return 0;
 #define RETURN_ERR(err,s) if ((err)==-1) { perror(s); return 0; }
@@ -142,7 +142,7 @@ int main()
     sa_serv.sin_family      = AF_INET;
     sa_serv.sin_addr.s_addr = INADDR_ANY;
     sa_serv.sin_port        = htons (s_port);          /* Server Port number */
-    err = bind(listen_sock, (struct sockaddr*)&sa_serv,sizeof(sa_serv));
+    err = bind(listen_sock, (struct sockaddr*)&sa_serv, sizeof(sa_serv));
 
     RETURN_ERR(err, "bind");
 
@@ -168,7 +168,8 @@ int main()
 
         if(FD_ISSET(listen_sock, &read_fd_set)){
             /* Socket for a TCP/IP connection is created */
-            sock = accept(listen_sock, (struct sockaddr*)&sa_cli, &client_len);
+            client_len = sizeof(sa_cli);
+            sock = accept(listen_sock, (struct sockaddr*) &sa_cli, &client_len);
             RETURN_ERR(sock, "accept");
             /* TCP connection is ready. */
             /* A SSL structure is created */
@@ -178,11 +179,9 @@ int main()
             /* Assign the socket into the SSL structure (SSL and socket without BIO) */
             SSL_set_fd(ssl, sock);
 
-            /* Perform SSL Handshake on the SSL server */
+            /* Perform SSL Handshake on the SL server */
             err = SSL_accept(ssl);
             RETURN_SSL(err);
-
-            FD_SET(sock, &read_fd_set);
 
             printf("client nr %d just connected\n", sock);
             err = SSL_write(ssl, "Whalecum\n", strlen("Whalecum\n"));
@@ -193,6 +192,7 @@ int main()
             sprintf(clientLog->port, "%d", ntohs(sa_cli.sin_port));
             writeToLog(1);
 
+            FD_SET(sock, &read_fd_set);
             sslArray[sock] = ssl;
         }
 
@@ -208,20 +208,10 @@ int main()
                 printf ("From %d: \nReceived %d chars: %s",i, err, buf);
 
                 if (checkIfBye(buf)) {
-                    /* user sent "\bye" */
-                    err = SSL_write(ssl, "Goodbye!", 
-                                strlen("Goodbye!"));
-                    RETURN_SSL(err);
-
                     SSL_free(sslArray[i]);
                     sslArray[i] = NULL;
                     writeToLog(0);
                 }
-
-                /* Send data to the SSL client */
-                err = SSL_write(ssl, "Roger from server", 
-                                strlen("Roger from server"));
-                RETURN_SSL(err);
             }
         }
     }

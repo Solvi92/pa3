@@ -19,7 +19,6 @@
 #include <unistd.h>
 #include <termios.h>
 #include <signal.h>
-#include <arpa/inet.h>
 
 /* Secure socket layer headers */
 #include <openssl/ssl.h>
@@ -33,8 +32,6 @@
    a quit command to terminate the client and to clean up the
    connection. */
 static int active = 1;
-const char *s_ipaddr = "127.0.0.1";
-
 
 /* To read a password without echoing it to the console.
  *
@@ -48,13 +45,12 @@ const char *s_ipaddr = "127.0.0.1";
  * operating system and C library). To restore echoing,
  * type 'reset' into the sell and press enter.
  */
-void getpasswd(const char *prompt, char *passwd, size_t size)
-{
+void getpasswd(const char *prompt, char *passwd, size_t size) {
 	struct termios old_flags, new_flags;
 
     /* Clear out the buffer content. */
     memset(passwd, 0, size);
-    
+
     /* Disable echo. */
 	tcgetattr(fileno(stdin), &old_flags);
 	memcpy(&new_flags, &old_flags, sizeof(old_flags));
@@ -83,22 +79,19 @@ void getpasswd(const char *prompt, char *passwd, size_t size)
 	}
 }
 
-
-
 /* If someone kills the client, it should still clean up the readline
    library, otherwise the terminal is in a inconsistent state. We set
    active to 0 to get out of the loop below. Also note that the select
    call below may return with -1 and errno set to EINTR. Do not exit
    select with this error. */
-void sigint_handler(int signum)
-{
+void sigint_handler(int signum) {
     active = 0;
+
     /* We should not use printf inside of signal handlers, this is not
      * considered safe. We may, however, use write() and fsync(). */
     write(STDOUT_FILENO, "Terminated.\n", 12);
     fsync(STDOUT_FILENO);
 }
-
 
 /* The next two variables are used to access the encrypted stream to
  * the server. The socket file descriptor server_fd is provided for
@@ -127,8 +120,7 @@ static char *prompt;
    gets called to handle the entered line. Implement the code to
    handle the user requests in this function. The client handles the
    server messages in the loop in main(). */
-void readline_callback(char *line)
-{
+void readline_callback(char *line) {
     char buffer[256];
     if (line == NULL) {
         rl_callback_handler_remove();
@@ -138,8 +130,7 @@ void readline_callback(char *line)
     if (strlen(line) > 0) {
         add_history(line);
     }
-    if ((strncmp("/bye", line, 4) == 0) ||
-        (strncmp("/quit", line, 5) == 0)) {
+    if ((strncmp("/bye", line, 4) == 0) || (strncmp("/quit", line, 5) == 0)) {
         rl_callback_handler_remove();
         active = 0;
         return;
@@ -149,7 +140,8 @@ void readline_callback(char *line)
         int i = 4;
         while (line[i] != '\0' && isspace(line[i])) { i++; }
         if (line[i] == '\0') {
-            write(STDOUT_FILENO, "Usage: /game username\n", 29);
+            write(STDOUT_FILENO, "Usage: /game username\n",
+                  29);
             fsync(STDOUT_FILENO);
             rl_redisplay();
             return;
@@ -162,19 +154,19 @@ void readline_callback(char *line)
         /* Skip whitespace */
         while (line[i] != '\0' && isspace(line[i])) { i++; }
         if (line[i] == '\0') {
-            write(STDOUT_FILENO, "Usage: /join chatroom\n", 22);
-            fsync(STDOUT_FILENO);
-            rl_redisplay();
-            return;
+                write(STDOUT_FILENO, "Usage: /join chatroom\n", 22);
+                fsync(STDOUT_FILENO);
+                rl_redisplay();
+                return;
         }
         char *chatroom = strdup(&(line[i]));
-        printf("chatroom: %s\n", chatroom);
+
         /* Process and send this information to the server. */
 
         /* Maybe update the prompt. */
         free(prompt);
-        prompt = NULL; /* What should the new prompt look like? -- username and chatroom*/
-		rl_set_prompt(prompt);
+        prompt = NULL; /* What should the new prompt look like? */
+	    rl_set_prompt(prompt);
         return;
     }
     if (strncmp("/list", line, 5) == 0) {
@@ -186,159 +178,131 @@ void readline_callback(char *line)
         return;
     }
     if (strncmp("/say", line, 4) == 0) {
-		/* Skip whitespace */
-		int i = 4;
-		while (line[i] != '\0' && isspace(line[i])) { i++; }
-		if (line[i] == '\0') {
-			write(STDOUT_FILENO, "Usage: /say username message\n", 29);
-			fsync(STDOUT_FILENO);
-			rl_redisplay();
-		    return;
-		}
-		/* Skip whitespace */
-		int j = i+1;
-		while (line[j] != '\0' && isgraph(line[j])) { j++; }
-		if (line[j] == '\0') {
-	        write(STDOUT_FILENO, "Usage: /say username message\n", 29);
-	        fsync(STDOUT_FILENO);
-	        rl_redisplay();
-	        return;
-		}
-		char *receiver = strndup(&(line[i]), j - i - 1);
-		char *message = strndup(&(line[j]), j - i - 1);
-		printf("receiver: %s \n message: %s \n", receiver, message);
+        /* Skip whitespace */
+        int i = 4;
+        while (line[i] != '\0' && isspace(line[i])) { i++; }
+        if (line[i] == '\0') {
+            write(STDOUT_FILENO, "Usage: /say username message\n",
+                  29);
+            fsync(STDOUT_FILENO);
+            rl_redisplay();
+            return;
+        }
+        /* Skip whitespace */
+        int j = i+1;
+        while (line[j] != '\0' && isgraph(line[j])) { j++; }
+        if (line[j] == '\0') {
+            write(STDOUT_FILENO, "Usage: /say username message\n",
+                  29);
+            fsync(STDOUT_FILENO);
+            rl_redisplay();
+            return;
+        }
+        char *receiver = strndup(&(line[i]), j - i - 1);
+        char *message = strndup(&(line[j]), j - i - 1);
 
-		/* Send private message to receiver. */
+        /* Send private message to receiver. */
 
-		return;
+        return;
     }
     if (strncmp("/user", line, 5) == 0) {
-		int i = 5;
-		/* Skip whitespace */
-		while (line[i] != '\0' && isspace(line[i])) { i++; }
-		if (line[i] == '\0') {
-			write(STDOUT_FILENO, "Usage: /user username\n", 22);
-			fsync(STDOUT_FILENO);
-			rl_redisplay();
-			return;
-		}
-		char *new_user = strdup(&(line[i]));
-		printf("new_user: %s \n", new_user);
-		char passwd[48];
-		getpasswd("Password: ", passwd, 48);
+        int i = 5;
+        /* Skip whitespace */
+        while (line[i] != '\0' && isspace(line[i])) { i++; }
+        if (line[i] == '\0') {
+            write(STDOUT_FILENO, "Usage: /user username\n", 22);
+            fsync(STDOUT_FILENO);
+            rl_redisplay();
+            return;
+        }
+        char *new_user = strdup(&(line[i]));
+        char passwd[48];
+        getpasswd("Password: ", passwd, 48);
 
-		/* Process and send this information to the server. */
+        /* Process and send this information to the server. */
 
-		/* Maybe update the prompt. */
-		free(prompt);
-		prompt = NULL; /* What should the new prompt look like? -- username?*/
-		rl_set_prompt(prompt);
-		return;
+        /* Maybe update the prompt. */
+        free(prompt);
+        prompt = NULL; /* What should the new prompt look like? */
+	    rl_set_prompt(prompt);
+        return;
     }
     if (strncmp("/who", line, 4) == 0) {
-		/* Query all available users */
-		return;
+        /* Query all available users */
+        return;
     }
     /* Sent the buffer to the server. */
     snprintf(buffer, 255, "Message: %s\n", line);
     write(STDOUT_FILENO, buffer, strlen(buffer));
+    SSL_write(server_ssl, buffer, strlen(buffer));
     fsync(STDOUT_FILENO);
 }
 
-int main(int argc, char **argv)
-{
-    struct sockaddr_in server;
-    int sock;
-    const SSL_METHOD *meth;
-    SSL_CTX *ssl_ctx;
-    char buf [4096];
-    user = NULL;
-    chatroom = NULL;
-
-    char msg[80];
-    fgets (msg, 80, stdin);
-
+int main(int argc, char **argv) {
 	/* Initialize OpenSSL */
+	int sock;
+    struct sockaddr_in server_addr;
+	char buf [4096];
+	short int s_port = 9965;
+	const char *s_ipaddr = "127.0.0.1";
+
+	/* Create and set up a listening socket. The sockets you
+	 * create here can be used in select calls, so do not forget
+	 * them.
+	 */
+	/* Load encryption & hashing algorithms for the SSL program */
 	SSL_library_init();
+
+	/* Load the error strings for SSL & CRYPTO APIs */
 	SSL_load_error_strings();
 
-	/*Create SSL_METHOD*/
-    meth = SSLv3_method();
-	/*Create SSL_CTX*/
-    ssl_ctx = SSL_CTX_new(meth);
+	/* Create an SSL_METHOD structure (choose an SSL/TLS protocol version) */
+	meth = TLSv1_method();
 
-    if(ssl_ctx == NULL) {
-    	printf("The context is null\n");
-    	exit(1);
-    }
+	/* Create an SSL_CTX structure */
+	*ssl_ctx = SSL_CTX_new(meth);
 
-    //printf("Setting up the certificate and private key\n");
-	/*Setting up the certificate and private key*/
-    //SSL_CTX_use_certificate_file(ssl_ctx, "fd.crt", SSL_FILETYPE_PEM);
-    //SSL_CTX_use_PrivateKey_file(ssl_ctx, "fd.key", SSL_FILETYPE_PEM);
-    /*Checking if client certificate and the private key matches*/
-    //SSL_CTX_check_private_key(ssl_ctx);
+ 	/* Set up a TCP socket */
+	sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+	memset (&server_addr, '\0', sizeof(server_addr));
+	server_addr.sin_family      = AF_INET;
+	server_addr.sin_port        = htons(s_port);       /* Server Port number */
+	server_addr.sin_addr.s_addr = inet_addr(s_ipaddr); /* Server IP */
 
+	/* Establish a TCP/IP connection to the SSL client */
+	connect(sock, (struct sockaddr*) &server_addr, sizeof(server_addr)); 
 
-    printf("setting up SSL connection\n");
 	server_ssl = SSL_new(ssl_ctx);
 
-    printf("Create the TCP socket connection\n");
-    /* Create the TCP socket connection */
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    memset(&server, '\0', sizeof(server));
-    server.sin_family      = AF_INET;
-    server.sin_port        = htons(9965);
-    server.sin_addr.s_addr = inet_addr(s_ipaddr);
-
-
-    printf("Connect to the server\n");
-    /* Connect to the server */
-    connect(sock, (struct sockaddr*) &server, sizeof(server));
-    printf("Connected\n");
-
-	if(server_ssl == NULL) {
-		printf("server_ssl is null\n");
-		exit(1);
-	}
-/*
-	printf("past the if statement\n");
-	SSL_set_connect_state(ssl_ctx);
-	printf("past the connect_state\n");
-*/
 	/* Use the socket for the SSL connection. */
 	SSL_set_fd(server_ssl, server_fd);
-	printf("past the set_fd\n");
-	/* SSL handshake on the SSL client */
-    SSL_connect(server_ssl);
-	printf("SSL connection complete\n");
+
+	/* Perform SSL Handshake on the SSL client */
+	SSL_connect(server_ssl);
 	
-	/* Now we can create BIOs and use them instead of the socket.
-	 * The BIO is responsible for maintaining the state of the
-	 * encrypted connection and the actual encryption. Reads and
-	 * writes to sock_fd will insert unencrypted data into the
-	 * stream, which even may crash the server.
-	 */
+	/* Receive Welcome message */
+	int len = 0;
 
-    /* Set up secure connection to the chatd server. */
+	len = SSL_read(server_ssl, buf, sizeof(buf)-1);                     
+	printf("From server: %s\n", buf);
+	buf[len] = '\0';
 
-    /* Read characters from the keyboard while waiting for input.
-     */
     prompt = strdup("> ");
     rl_callback_handler_install(prompt, (rl_vcpfunc_t*) &readline_callback);
+
     while (active) {
-    	fd_set rfds;
-		struct timeval timeout;
+        fd_set rfds;
+    	struct timeval timeout;
 
         FD_ZERO(&rfds);
         FD_SET(STDIN_FILENO, &rfds);
-		timeout.tv_sec = 5;
-		timeout.tv_usec = 0;
- 	  
-		int r = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &timeout);
+    	timeout.tv_sec = 5;
+    	timeout.tv_usec = 0;
+
+        int r = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &timeout);
         if (r < 0) {
-        	if (errno == EINTR) {
-            	/* This should either retry the call or
+            if (errno == EINTR) {
+                /* This should either retry the call or
                    exit the loop, depending on whether we
                    received a SIGTERM. */
                 continue;
@@ -348,27 +312,21 @@ int main(int argc, char **argv)
             break;
         }
         if (r == 0) {
-        	write(STDOUT_FILENO, "No message?\n", 12);
+            write(STDOUT_FILENO, "No message?\n", 12);
             fsync(STDOUT_FILENO);
             /* Whenever you print out a message, call this
                to reprint the current input line. */
-			rl_redisplay();
+		    rl_redisplay();
             continue;
         }
         if (FD_ISSET(STDIN_FILENO, &rfds)) {
-        	rl_callback_read_char();
+            rl_callback_read_char();
         }
-        /* Handle messages from the server here! */
 
+        /* Handle messages from the server here! */
     }
     /* replace by code to shutdown the connection and exit
        the program. */
-
-    /* shutdown and close the connection with the server */
-    close(sock);
-    SSL_shutdown(server_ssl);
-
-    /* free memory */
-	SSL_free(server_ssl);
-	SSL_CTX_free(ssl_ctx);
+    /*--------------- SSL closure ---------------*/
+	return 0;
 }
