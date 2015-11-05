@@ -29,25 +29,25 @@
 #define RSA_SERVER_CERT "fd.crt"
 #define RSA_SERVER_KEY "fd.key"
 
-#define RETURN_NULL(x)    if ((x)==NULL) return 0;
-#define RETURN_ERR(err,s) if ((err)==-1) { perror(s); return 0; }
-#define RETURN_SSL(err)   if ((err)==-1) { ERR_print_errors_fp(stderr); return 0; }
+#define RETURN_NULL(x)    if ((x)==NULL) {exit(1);}
+#define RETURN_ERR(err,s) if ((err)==-1) { perror(s); exit(1); }
+#define RETURN_SSL(err)   if ((err)==-1) { ERR_print_errors_fp(stderr); exit(1); }
 
-typedef struct {
-    char ip[64];
-    char port[8];
-} Client;
-
+/* Structs */
 typedef struct {
     char username[64];
-    char password[64];
-    int chatroomID;
+    char chatroom[64];
+    int sock;
     SSL* ssl;
+    char ip[64];
+    char port[8];
 } ClientInfo;
 
-ClientInfo* clientInfo;
-Client* clientLog;
-static GTree *tree;
+/* Globals */
+ClientInfo*   clientInfo;
+static GTree* tree;
+static int    max;
+GString *allUsers;
 
 /* This can be used to build instances of GTree that index on
    the address of a connection. */
@@ -84,14 +84,15 @@ void writeToLog(int connecting) {
 
     GString *stringBuilder = g_string_new(buf);
     stringBuilder = g_string_append(stringBuilder, " : ");
-    stringBuilder = g_string_append(stringBuilder, clientLog->ip);
+    stringBuilder = g_string_append(stringBuilder, clientInfo->ip);
     stringBuilder = g_string_append(stringBuilder, ":");
-    stringBuilder = g_string_append(stringBuilder, clientLog->port);
+    stringBuilder = g_string_append(stringBuilder, clientInfo->port);
     
     if(connecting)
         stringBuilder = g_string_append(stringBuilder, " connected\n");
-    else
+    else {
         stringBuilder = g_string_append(stringBuilder, " disconnected\n");
+    }
     
     if(logFile == NULL) {
         printf("Error when opening file\n");
@@ -112,38 +113,135 @@ int checkIfBye(char* message) {
     return 0;
 }
 
+/*  */
+static gint getListOfUsers(gpointer key, gpointer value, gpointer data) {
+    ClientInfo* cliInf;
+    cliInf = g_new0(ClientInfo, 1);
+    cliInf = value;
+
+    allUsers = g_string_append(allUsers, "\nUsername: ");
+    allUsers = g_string_append(allUsers, cliInf->username);
+    allUsers = g_string_append(allUsers, "\n    IP: ");
+    allUsers = g_string_append(allUsers, cliInf->ip);
+    allUsers = g_string_append(allUsers, "\n    Port: ");
+    allUsers = g_string_append(allUsers, cliInf->port);
+    allUsers = g_string_append(allUsers, "\n    Chatroom: ");
+    allUsers = g_string_append(allUsers, cliInf->chatroom);
+    allUsers = g_string_append(allUsers, "\n");
+    return 0;
+}
+
 static gint treeTraversal(gpointer key, gpointer value, gpointer data) {
-    struct sockaddr_in *x = key;
-    printf("sin_addr: %s\n", inet_ntoa(x->sin_addr));
-    printf("key: %p\n", key);
-    printf("value: %p\n", value);
-    printf("data: %p\n", data);
-    return FALSE;
+    char buf[1024];
+    int err;
+
+    /* Get the client info from the tree */
+    ClientInfo* cliInf = (ClientInfo*)value;
+    fd_set *read_fd_set = (fd_set*)data;
+
+    printf("from sock: %d\n", cliInf->sock);
+
+    if(FD_ISSET(cliInf->sock, read_fd_set)) {
+        /*------- DATA EXCHANGE - Receive message and send reply. -------*/
+        /* Receive data from the SSL client */
+        printf("before read on %d\n", cliInf->sock);
+        err = SSL_read(cliInf->ssl, buf, sizeof(buf) - 1);
+        printf("after read on %d\n", cliInf->sock);
+        RETURN_SSL(err);
+
+        buf[err] = '\0';
+        printf ("From %d: \nReceived %d chars: %s", cliInf->sock, err, buf);
+
+        /* Check if the client sent "/bye" */
+        if (checkIfBye(buf) || err < 1) {
+            writeToLog(0);
+            /*Pepperoni*/
+            g_tree_remove(tree, key);
+        } 
+        if (strncmp("/who", buf, 4) == 0) {
+            allUsers = g_string_new("");
+            g_tree_foreach(tree, getListOfUsers, read_fd_set);
+            printf("\nallUsers: %s", allUsers->str);
+            printf("usersize: %d\n", strlen(allUsers->str));
+
+            SSL_write(cliInf->ssl, allUsers->str, strlen(allUsers->str));
+            //SSL_write(cliInf->ssl, "HALLLOOOOOO PLZ WORK!\n", strlen("HALLLOOOOOO PLZ WORK!\n") + 1);
+            g_string_free(allUsers, 1);
+        }
+
+        if(cliInf->sock > max) {
+            max = cliInf->sock;
+        }
+    }
+
+    return 0;
+}
+
+static gint setFD(gpointer key, gpointer value, gpointer data) {
+    ClientInfo* cliInf = (ClientInfo*)value;
+    fd_set *read_fd_set = (fd_set*)data;
+    FD_SET(cliInf->sock, read_fd_set);
+    if(cliInf->sock > max) {
+        max = cliInf->sock;
+    }
+    return 0;
+}
+
+/* Takes the new client makes a user and adds it to the tree */
+void createUser(SSL_CTX *ctx, struct sockaddr_in sa_cli, int listen_sock) {
+    /* Socket for a TCP/IP connection is created */
+    int err;
+    socklen_t client_len = sizeof(sa_cli);
+    int sock = accept(listen_sock, (struct sockaddr*) &sa_cli, &client_len);
+    RETURN_ERR(sock, "accept");
+
+    /* TCP connection is ready. */
+    /* A SSL structure is created */
+    SSL *ssl = SSL_new(ctx);
+    RETURN_NULL(ssl);
+
+    /* Assign the socket into the SSL structure (SSL and socket without BIO) */
+    SSL_set_fd(ssl, sock);
+
+    /* Perform SSL Handshake on the SL server */
+    err = SSL_accept(ssl);
+    RETURN_SSL(err);
+
+    /* Add the necessary info into clientInfo */
+    clientInfo = g_new0(ClientInfo, 1);
+    clientInfo->ssl = ssl;
+    clientInfo->sock = sock;
+    strcpy(clientInfo->username, "Anonymous");
+    strcpy(clientInfo->chatroom, "No chatroom");
+    strcpy(clientInfo->ip, inet_ntoa(sa_cli.sin_addr));
+    sprintf(clientInfo->port, "%d", ntohs(sa_cli.sin_port));
+
+    /* Write to clientlog.txt that the client connected */
+    writeToLog(1);
+
+    /* The user is added to the tree with the sockaddr as key and 
+     * the client Info as value */
+    struct sockaddr_in *key = g_new0(struct sockaddr_in, 1);
+    memcpy(key, &sa_cli, sizeof(sa_cli));
+    g_tree_insert(tree, key, clientInfo);
+    
+    /* Send a welcome message to the new client */
+    err = SSL_write(ssl, "Welcome\n", strlen("Welcome\n"));
+    RETURN_SSL(err);
 }
 
 int main()
 {
-    int           err;
-    int           listen_sock;
-    int           sock;
-    struct        sockaddr_in sa_serv;
-    struct        sockaddr_in sa_cli;
-    socklen_t     client_len;
-    char          buf[4096];
-    int max;
-    struct sockaddr_in *addr = g_new0(struct sockaddr_in, 1);
-    tree = g_tree_new((GCompareFunc) sockaddr_in_cmp);
-
-    SSL_CTX       *ctx;
-    SSL           *ssl = NULL;
-    const SSL_METHOD    *meth;
-    short int     s_port = 9965;
-    fd_set read_fd_set;
-    SSL* sslArray[1024];
-
-    for(int i = 0; i < 1024; ++i) {
-        sslArray[i] = NULL;
-    }
+    int               err;
+    int               listen_sock;
+    struct            sockaddr_in sa_serv;
+    struct            sockaddr_in sa_cli;
+    socklen_t         client_len;
+    char              buf[4096];
+    SSL_CTX           *ctx;
+    const SSL_METHOD  *meth;
+    short int         s_port = 9965;
+    tree              = g_tree_new((GCompareFunc) sockaddr_in_cmp);
 
     /*----------------------------------------------------------------*/
     /* Load encryption & hashing algorithms for the SSL program */
@@ -178,10 +276,9 @@ int main()
         return 0;
     }
 
-    /* ----------------------------------------------- */
+    /* ---------------------clientLog-------------------------- */
     /* Set up a TCP socket */
     listen_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-    max = listen_sock;
     RETURN_ERR(listen_sock, "socket");
     memset (&sa_serv, '\0', sizeof(sa_serv));
     sa_serv.sin_family      = AF_INET;
@@ -195,98 +292,45 @@ int main()
     err = listen(listen_sock, 1024);
     RETURN_ERR(err, "listen");
     client_len = sizeof(sa_cli);
-
+ 
     while(1) {
+        fd_set read_fd_set;
         FD_ZERO (&read_fd_set);
         FD_SET (listen_sock, &read_fd_set);
 
-        for(int i = 0; i < 1024; i++) {
-            if(sslArray[i] != NULL) {
-                FD_SET(i, &read_fd_set);
-                max = i;
-            }
-        }
+        /* Go through the tree and set FD on all of the clients */
+        max = listen_sock;
+        g_tree_foreach(tree, setFD, &read_fd_set);
 
+        printf("before select\n");
         if(select(max + 1, &read_fd_set, NULL,  NULL, NULL) < 0) {
             perror("select");
             exit (1);
         } 
 
+        /* A new client connected */
         if(FD_ISSET(listen_sock, &read_fd_set)){
-            /* Socket for a TCP/IP connection is created */
-            client_len = sizeof(sa_cli);
-            sock = accept(listen_sock, (struct sockaddr*) &sa_cli, &client_len);
-
-            RETURN_ERR(sock, "accept");
-            /* TCP connection is ready. */
-            /* A SSL structure is created */
-            ssl = SSL_new(ctx);
-            RETURN_NULL(ssl);
-
-            /* Assign the socket into the SSL structure (SSL and socket without BIO) */
-            SSL_set_fd(ssl, sock);
-
-            /* Perform SSL Handshake on the SL server */
-            err = SSL_accept(ssl);
-            RETURN_SSL(err);
-
-            err = SSL_write(ssl, "Whalecum\n", strlen("Whalecum\n"));
-            RETURN_SSL(err);
-
-            /* Take care of the log info */
-            clientLog = g_new0(Client, 1);
-            strcpy(clientLog->ip, inet_ntoa(sa_cli.sin_addr));
-            sprintf(clientLog->port, "%d", ntohs(sa_cli.sin_port));
-            writeToLog(1);
-
-            FD_SET(sock, &read_fd_set);
-
-            /* Take care of the client info */
-            clientInfo = g_new0(ClientInfo, 1);
-            clientInfo->ssl = ssl;
-            /* The user is added to the tree */
-            sslArray[sock] = ssl;
-            memcpy(addr, &sa_cli, sizeof(sa_cli));
-            g_tree_insert(tree, addr, clientInfo);
+            createUser(ctx, sa_cli, listen_sock);
         }
 
+        /* Go through all clients and check if there is data to recieve 
+         * See treeTraversal() for more info */
         g_tree_foreach(tree, treeTraversal, &read_fd_set);
-        for(int i = 0 ; i < FD_SETSIZE; ++i) {
-            if(FD_ISSET(i, &read_fd_set) && sslArray[i] != NULL) {
-                /*------- DATA EXCHANGE - Receive message and send reply. -------*/
-                /* Receive data from the SSL client */
-                err = SSL_read(sslArray[i], buf, sizeof(buf) - 1);
-                RETURN_SSL(err);
-
-                buf[err] = '\0';
-                printf ("From %d: \nReceived %d chars: %s",i, err, buf);
-
-                if (checkIfBye(buf)) {
-                    SSL_free(sslArray[i]);
-                    sslArray[i] = NULL;
-                    writeToLog(0);
-                }
-            }
-        }
+        printf("max: %d\n", max);
     }
 
     /*--------------- SSL closure ---------------*/
 
     //writeToLog(0); // write to log that the client disconnected
     /* Shutdown this side (server) of the connection. */
-    err = SSL_shutdown(ssl);
+    /*err = SSL_shutdown(ssl);
     RETURN_SSL(err);
-
+*/
     /* Terminate communication on a socket */
-    err = close(sock);
-    RETURN_ERR(err, "close");
+    //err = close(sock);
+    //RETURN_ERR(err, "close");
 
     /* Freeing the allocated memory */
-    for(int i = NULL; i < FD_SETSIZE; ++i) {
-        SSL_free(sslArray[i]);
-    }
-
-    SSL_free(ssl);
-    SSL_CTX_free(ctx);
-    g_free(clientLog);
+    //SSL_free(ssl);
+    //SSL_CTX_free(ctx);
 }

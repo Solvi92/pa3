@@ -93,6 +93,7 @@ void
 sigint_handler(int signum)
 {
 	active = 0;
+	printf("signum: %d\n", signum);
 
 	/* We should not use printf inside of signal handlers, this is not
 	* considered safe. We may, however, use write() and fsync(). */
@@ -106,7 +107,7 @@ sigint_handler(int signum)
  * select (if needed), while the encrypted communication should use
  * ssl and the SSL API of OpenSSL.
  */
-static int server_fd;
+//static int server_fd;
 static SSL *ssl;
 
 /* This variable shall point to the name of the user. The initial value
@@ -172,7 +173,7 @@ void readline_callback(char *line)
 			rl_redisplay();
         return;
 		}
-		char *chatroom = strdup(&(line[i]));
+		//char *chatroom = strdup(&(line[i]));
 
 		/* Process and send this information to the server. */
 
@@ -192,31 +193,31 @@ void readline_callback(char *line)
 	}
 	if (strncmp("/say", line, 4) == 0) {
 	/* Skip whitespace */
-	int i = 4;
-	while (line[i] != '\0' && isspace(line[i])) { i++; }
-	if (line[i] == '\0') {
-		write(STDOUT_FILENO, "Usage: /say username message\n",
-		      29);
-		fsync(STDOUT_FILENO);
-		rl_redisplay();
-		return;
-	}
-	/* Skip whitespace */
-	int j = i+1;
-	while (line[j] != '\0' && isgraph(line[j])) { j++; }
-	if (line[j] == '\0') {
-		write(STDOUT_FILENO, "Usage: /say username message\n",
-		      29);
-		fsync(STDOUT_FILENO);
-		rl_redisplay();
-		return;
-	}
-	char *receiver = strndup(&(line[i]), j - i - 1);
-	char *message = strndup(&(line[j]), j - i - 1);
+		int i = 4;
+		while (line[i] != '\0' && isspace(line[i])) { i++; }
+		if (line[i] == '\0') {
+			write(STDOUT_FILENO, "Usage: /say username message\n",
+			      29);
+			fsync(STDOUT_FILENO);
+			rl_redisplay();
+			return;
+		}
+		/* Skip whitespace */
+		int j = i+1;
+		while (line[j] != '\0' && isgraph(line[j])) { j++; }
+		if (line[j] == '\0') {
+			write(STDOUT_FILENO, "Usage: /say username message\n",
+			      29);
+			fsync(STDOUT_FILENO);
+			rl_redisplay();
+			return;
+		}
+		//char *receiver = strndup(&(line[i]), j - i - 1);
+		//char *message = strndup(&(line[j]), j - i - 1);
 
-	/* Send private message to receiver. */
+		/* Send private message to receiver. */
 
-	return;
+		return;
 	}
 	if (strncmp("/user", line, 5) == 0) {
         int i = 5;
@@ -228,7 +229,7 @@ void readline_callback(char *line)
                 rl_redisplay();
                 return;
         }
-        char *new_user = strdup(&(line[i]));
+        //char *new_user = strdup(&(line[i]));
         char passwd[48];
         getpasswd("Password: ", passwd, 48);
 
@@ -242,6 +243,9 @@ void readline_callback(char *line)
 	}
 	if (strncmp("/who", line, 4) == 0) {
         /* Query all available users */
+        int err;
+        char buf[1024];
+    	SSL_write(ssl, line, strlen(line));
         return;
 	}
 	/* Sent the buffer to the server. */
@@ -253,12 +257,12 @@ void readline_callback(char *line)
 
 int main(int argc, char **argv)
 {
-	int err;
 	int sock;
 	struct sockaddr_in server_addr;
-	char buf [4096];
 	short int s_port = 9965;
 	const char *s_ipaddr = "127.0.0.1";
+	int err;
+	char buf[1024];
 
 	/* Initialize OpenSSL */
 	SSL_library_init();
@@ -280,8 +284,8 @@ int main(int argc, char **argv)
 	server_addr.sin_addr.s_addr = inet_addr(s_ipaddr); /* Server IP */
 
 	/* Establish a TCP/IP connection to the SSL client */
-	err = connect(sock, (struct sockaddr*) &server_addr, sizeof(server_addr)); 
-	
+	connect(sock, (struct sockaddr*) &server_addr, sizeof(server_addr)); 
+
 	ssl = SSL_new(ssl_ctx);
 	/* Use the socket for the SSL connection. */
 	SSL_set_fd(ssl, sock);
@@ -289,16 +293,24 @@ int main(int argc, char **argv)
 
     prompt = strdup("> ");
     rl_callback_handler_install(prompt, (rl_vcpfunc_t*) &readline_callback);
+
+    /*err = SSL_read(ssl, buf, sizeof(buf) - 1);
+
+    buf[err] = '\0';
+    printf ("From server: %s", buf);*/
+
     while (active) {
         fd_set rfds;
 		struct timeval timeout;
 
         FD_ZERO(&rfds);
         FD_SET(STDIN_FILENO, &rfds);
+        FD_SET(sock, &rfds);
+        int max = STDIN_FILENO > sock ? STDIN_FILENO : sock;
 		timeout.tv_sec = 5;
 		timeout.tv_usec = 0;
 
-        int r = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &timeout);
+        int r = select(max + 1, &rfds, NULL, NULL, &timeout);
         if (r < 0) {
             if (errno == EINTR) {
                 /* This should either retry the call or
@@ -319,6 +331,11 @@ int main(int argc, char **argv)
         }
         if (FD_ISSET(STDIN_FILENO, &rfds)) {
             rl_callback_read_char();
+        }
+        if (FD_ISSET(sock, &rfds)) {
+	    	err = SSL_read(ssl, buf, strlen(buf) - 1);
+	    	buf[err] = '\0';
+	    	printf("the buffer: %s size: %d", buf, err);
         }
         /* Handle messages from the server here! */
     }
