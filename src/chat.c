@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <termios.h>
 #include <signal.h>
+#include <arpa/inet.h>
 
 /* Secure socket layer headers */
 #include <openssl/ssl.h>
@@ -110,22 +111,12 @@ sigint_handler(int signum)
 //static int server_fd;
 static SSL *ssl;
 
-/* This variable shall point to the name of the user. The initial value
-   is NULL. Set this variable to the username once the user managed to be
-   authenticated. */
-static char *user;
-
-/* This variable shall point to the name of the chatroom. The initial
-   value is NULL (not member of a chat room). Set this variable whenever
-   the user changed the chat room successfully. */
-static char *chatroom;
-
 /* This prompt is used by the readline library to ask the user for
  * input. It is good style to indicate the name of the user and the
  * chat room he is in as part of the prompt. */
 static char *prompt;
 
-
+int loggedIn = 0;
 
 /* When a line is entered using the readline library, this function
    gets called to handle the entered line. Implement the code to
@@ -171,11 +162,12 @@ void readline_callback(char *line)
 			write(STDOUT_FILENO, "Usage: /join chatroom\n", 22);
 			fsync(STDOUT_FILENO);
 			rl_redisplay();
-        return;
+        	return;
 		}
 		//char *chatroom = strdup(&(line[i]));
 
 		/* Process and send this information to the server. */
+    	SSL_write(ssl, line, strlen(line));
 
 		/* Maybe update the prompt. */
 		free(prompt);
@@ -184,7 +176,7 @@ void readline_callback(char *line)
         return;
 	}
 	if (strncmp("/list", line, 5) == 0) {
-        /* Query all available chat rooms */
+    	SSL_write(ssl, line, strlen(line));
         return;
 	}
 	if (strncmp("/roll", line, 5) == 0) {
@@ -212,6 +204,8 @@ void readline_callback(char *line)
 			rl_redisplay();
 			return;
 		}
+		SSL_write(ssl, line, strlen(line));
+
 		//char *receiver = strndup(&(line[i]), j - i - 1);
 		//char *message = strndup(&(line[j]), j - i - 1);
 
@@ -224,15 +218,16 @@ void readline_callback(char *line)
         /* Skip whitespace */
         while (line[i] != '\0' && isspace(line[i])) { i++; }
         if (line[i] == '\0') {
-                write(STDOUT_FILENO, "Usage: /user username\n", 22);
-                fsync(STDOUT_FILENO);
-                rl_redisplay();
-                return;
+            write(STDOUT_FILENO, "Usage: /user username\n", 22);
+            fsync(STDOUT_FILENO);
+            rl_redisplay();
+            return;
         }
+		SSL_write(ssl, line, strlen(line));
         //char *new_user = strdup(&(line[i]));
         char passwd[48];
         getpasswd("Password: ", passwd, 48);
-
+		//SSL_write(ssl, passwd, strlen(passwd));
         /* Process and send this information to the server. */
 
         /* Maybe update the prompt. */
@@ -243,26 +238,26 @@ void readline_callback(char *line)
 	}
 	if (strncmp("/who", line, 4) == 0) {
         /* Query all available users */
-        int err;
-        char buf[1024];
     	SSL_write(ssl, line, strlen(line));
         return;
 	}
 	/* Sent the buffer to the server. */
-	snprintf(buffer, 255, "%s\n", line);
-	write(STDOUT_FILENO, buffer, strlen(buffer));
-	fsync(STDOUT_FILENO);
+	snprintf(buffer, 255, "%s", line);
+	//fsync(STDOUT_FILENO);
 	SSL_write(ssl, buffer, strlen(buffer));
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
+	if(argc != 3) {
+		printf("To run the client please have a localhost and a port number.\n");
+		return 0;
+	}
 	int sock;
 	struct sockaddr_in server_addr;
-	short int s_port = 9965;
 	const char *s_ipaddr = "127.0.0.1";
 	int err;
 	char buf[1024];
+	short int s_port = strtol(argv[2], NULL, 0);
 
 	/* Initialize OpenSSL */
 	SSL_library_init();
@@ -291,7 +286,7 @@ int main(int argc, char **argv)
 	SSL_set_fd(ssl, sock);
 	SSL_connect(ssl);
 
-    prompt = strdup("> ");
+    //prompt = strdup("Anonymous: \n");
     rl_callback_handler_install(prompt, (rl_vcpfunc_t*) &readline_callback);
 
     /*err = SSL_read(ssl, buf, sizeof(buf) - 1);
@@ -323,19 +318,20 @@ int main(int argc, char **argv)
             break;
         }
         if (r == 0) {
-            fsync(STDOUT_FILENO);
+            //fsync(STDOUT_FILENO);
             /* Whenever you print out a message, call this
                to reprint the current input line. */
-			rl_redisplay();
+			//rl_redisplay();
             continue;
         }
         if (FD_ISSET(STDIN_FILENO, &rfds)) {
             rl_callback_read_char();
         }
         if (FD_ISSET(sock, &rfds)) {
-	    	err = SSL_read(ssl, buf, strlen(buf) - 1);
+        	/* if there is a message form the server this is called */
+	    	err = SSL_read(ssl, buf, sizeof(buf) - 1);
 	    	buf[err] = '\0';
-	    	printf("the buffer: %s size: %d", buf, err);
+	    	printf("%s\n", buf);
         }
         /* Handle messages from the server here! */
     }
