@@ -77,7 +77,6 @@ int sockaddr_in_cmp(const void *addr1, const void *addr2)
 }
 
 void writeToLog(int connecting) {
-    /* Log the client in to clients.log if the client connected or disconnected */
     FILE *logFile;
     logFile = fopen("clients.log", "a");
  
@@ -91,19 +90,11 @@ void writeToLog(int connecting) {
     stringBuilder = g_string_append(stringBuilder, clientInfo->ip);
     stringBuilder = g_string_append(stringBuilder, ":");
     stringBuilder = g_string_append(stringBuilder, clientInfo->port);
-    /*if(!strcmp(clientInfo->username, "Anonymous")) {
-        stringBuilder = g_string_append(stringBuilder, " ");
-        stringBuilder = g_string_append(stringBuilder, clientInfo->username);
-        if(connecting)
-            stringBuilder = g_string_append(stringBuilder, " authenticated");
-        else {
-            stringBuilder = g_string_append(stringBuilder, " authentication error");
-        }
-    }*/
+    
     if(connecting)
-        stringBuilder = g_string_append(stringBuilder, " connected");
+        stringBuilder = g_string_append(stringBuilder, " connected\n");
     else {
-        stringBuilder = g_string_append(stringBuilder, " disconnected");
+        stringBuilder = g_string_append(stringBuilder, " disconnected\n");
     }
     
     if(logFile == NULL) {
@@ -127,7 +118,7 @@ int checkIfBye(char* message) {
 
 /*  */
 static gint getListOfUsers(gpointer key, gpointer value, gpointer data) {
-    /* getting rid of warning: unused parameter */
+    /* getting rid of warning unused parameter */
     (void)key;
     (void)data;
     /* make the string that contains info about all users */
@@ -146,7 +137,7 @@ static gint getListOfUsers(gpointer key, gpointer value, gpointer data) {
 }
 
 static gint getListOfChatrooms(gpointer key, gpointer value, gpointer data) {
-    /* getting rid of warning: unused parameter */
+    /* getting rid of warning unused parameter */
     (void)value;
     (void)data;
 
@@ -158,7 +149,6 @@ static gint getListOfChatrooms(gpointer key, gpointer value, gpointer data) {
 static void sendToUser(gpointer data, gpointer user_data) {
     char* message = user_data;
     ClientInfo* cliInf = (ClientInfo*)data;
-
     SSL_write(cliInf->ssl, message, strlen(message));
 }
 
@@ -216,7 +206,6 @@ static gint treeTraversal(gpointer key, gpointer value, gpointer data) {
             sprintf(msgString, "Welcome to the chat room %s!\n", room);
             err = SSL_write(cliInf->ssl, msgString, strlen(msgString));
             RETURN_SSL(err);
-            g_free(room);
         }
         else if (strncmp("/list", buf, 5) == 0) {
             /* Check if the client sent "/list" */
@@ -233,34 +222,7 @@ static gint treeTraversal(gpointer key, gpointer value, gpointer data) {
             /* Skip whitespace */
             while (buf[i] != '\0' && isspace(buf[i])) { i++; }
             strcpy(user, buf + i);
-
-            /* Change the clientinfo and add it back to the tree */
-            strcpy(clientInfo->username, user);
-            g_tree_insert(usersTree, key, cliInf);
-            /* Give the user some feedback about the username */
-            //err = SSL_read(cliInf->ssl, buf, sizeof(buf) - 1);
-            //RETURN_SSL(err);
-            //char* notPassword = g_new0(char, strlen(buf) - 5);
-            //strcpy(notPassword, buf + i);
-                
-            char msgString[128];
-            sprintf(msgString, "Your username is: %s\n", user);
-            SSL_write(cliInf->ssl, msgString, strlen(msgString));
-            g_free(user);
-            //g_free(notPassword);
-        }
-        else if (strncmp("/say", buf, 4) == 0) {
-            int i = 4;
-            char* user = g_new0(char, strlen(buf) - 4);
-            while (buf[i] != '\0' && isspace(buf[i])) { i++; }
-            strcpy(user, buf + i);
-
-            int j = i+1;
-            char* msg = g_new0(char, strlen(buf) - 4);
-            while (buf[j] != '\0' && isgraph(buf[j])) { j++; }
-            strcpy(msg, buf + j + 1);
-            printf("msg: %s user: %s\n", msg, user);
-
+            printf("user just changed his user name to: %s\n", user);
         }
         else {
             /* Send all users in the same room the message */
@@ -276,7 +238,7 @@ static gint treeTraversal(gpointer key, gpointer value, gpointer data) {
 }
 
 static gint setFD(gpointer key, gpointer value, gpointer data) {
-    /* getting rid of warning: unused parameter */
+    /* getting rid of warning unused parameter */
     (void)key;
 
     ClientInfo* cliInf = (ClientInfo*)value;
@@ -334,12 +296,11 @@ void createUser(SSL_CTX *ctx, struct sockaddr_in sa_cli, int listen_sock) {
     /* Send a welcome message to the new client */
     err = SSL_write(ssl, "Welcome\n", strlen("Welcome\n"));
     RETURN_SSL(err);
-    g_free(key);
 }
 
 int main(int argc, char **argv) {
     if(argc != 2) {
-        printf("To run the client please only insert a port number.\n");
+        printf("To run the client please only have a port number.\n");
         return 0;
     }
     int               err;

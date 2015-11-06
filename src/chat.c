@@ -116,7 +116,7 @@ static SSL *ssl;
  * chat room he is in as part of the prompt. */
 static char *prompt;
 
-int loggedIn = 0;
+
 
 /* When a line is entered using the readline library, this function
    gets called to handle the entered line. Implement the code to
@@ -204,8 +204,6 @@ void readline_callback(char *line)
 			rl_redisplay();
 			return;
 		}
-		SSL_write(ssl, line, strlen(line));
-
 		//char *receiver = strndup(&(line[i]), j - i - 1);
 		//char *message = strndup(&(line[j]), j - i - 1);
 
@@ -227,7 +225,7 @@ void readline_callback(char *line)
         //char *new_user = strdup(&(line[i]));
         char passwd[48];
         getpasswd("Password: ", passwd, 48);
-		//SSL_write(ssl, passwd, strlen(passwd));
+
         /* Process and send this information to the server. */
 
         /* Maybe update the prompt. */
@@ -286,7 +284,7 @@ int main(int argc, char **argv) {
 	SSL_set_fd(ssl, sock);
 	SSL_connect(ssl);
 
-    //prompt = strdup("Anonymous: \n");
+    prompt = strdup("Anonymous: \n");
     rl_callback_handler_install(prompt, (rl_vcpfunc_t*) &readline_callback);
 
     /*err = SSL_read(ssl, buf, sizeof(buf) - 1);
